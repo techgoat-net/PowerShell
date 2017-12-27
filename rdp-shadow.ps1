@@ -16,7 +16,7 @@ $Sessions=@()
     $objSession | Add-Member -MemberType NoteProperty -Name Type -Value $_.substring(1,3).trim()
     $objSession | Add-Member -MemberType NoteProperty -Name Username -Value $_.substring(19,22).trim()
     $objSession | Add-Member -MemberType NoteProperty -Name Status -Value $_.substring(48,8).trim()
-    if($objSession.Username -ne "" -and $objSession.Username -ne "USERNAME" -and $objSesson.Username -notlike $env:username) {
+    if($objSession.Username -ne "" -and $objSession.Username -ne "USERNAME" -and $objSesson.Username -notlike $env:username -and $objSession.Status -eq "Active") {
         $Sessions+=$objSession
     }
 }
@@ -76,6 +76,6 @@ $Sessions | Where-Object { $_.Username -eq $Username } | Foreach-Object {
     }
 }
 # Und wenn der Benutzername in der Liste nicht vorkommt, auhc entspr. Meldung ausgeben
-if($found -eq $false) {
+if($found -eq $false -and $global:Username -ne "") {
     [System.Windows.Forms.MessageBox]::Show("User '$Username' seems to be not logged on to $ComputerName.","Information",0,[System.Windows.Forms.MessageBoxIcon]::Information) >$null
 }
