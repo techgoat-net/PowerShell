@@ -56,6 +56,7 @@ if($Username -eq "") {
     $objForm.MaximizeBox = $False
     # Dialogfenster anzeigen
     [void] $objForm.ShowDialog()
+    $Username=$global:Username
 }
 $found=$false
 # Finde die Sitzung des ausgewaehlten Benutzernamens
@@ -72,6 +73,6 @@ $Sessions | Where-Object { $_.Username -eq $Username } | Foreach-Object {
     }
 }
 # Und wenn der Benutzername in der Liste nicht vorkommt, auhc entspr. Meldung ausgeben
-if($found -eq $false -and $global:Username -ne "") {
+if($found -eq $false -and $Username -ne "") {
     [System.Windows.Forms.MessageBox]::Show("User '$Username' seems to be not logged on to $ComputerName.","Information",0,[System.Windows.Forms.MessageBoxIcon]::Information) >$null
 }
