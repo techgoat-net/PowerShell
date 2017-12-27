@@ -27,17 +27,9 @@ if($Username -eq "") {
     # Wir laden die Assemblies fuer eigene Formen / Fenster
     [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
     [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
-    
     # Das Dialogfenster wird definiert
     $objForm=New-Object System.Windows.Forms.Form
     $objForm.Text="Select session to shadow"
-    $w=220
-    if($Sessions.Count -ge 3) {
-        $w=630
-    }
-    elseif($Sessions.Count -eq 2) {
-        $w=430
-    }
     $x=0
     $y=0
     # Und wir gehen nun die Sitzungen durch und erstellen jeweils einen Button an entspr. Position
@@ -47,7 +39,7 @@ if($Username -eq "") {
             $x=0
         }
         $objBtn=New-Object System.Windows.Forms.Button
-        $objBtn.Location=New-Object System.Drawing.Size($(10+$x*200),$(10+$y*34))
+        $objBtn.Location=New-Object System.Drawing.Size($(4+$x*200),$(4+$y*34))
         $objBtn.Size=New-Object System.Drawing.Size(190,24)
         $objBtn.Text=$_.Username
         # Und wenn man drauf klickt, wird die globale Variable beschrieben
@@ -55,9 +47,13 @@ if($Username -eq "") {
         $objForm.Controls.Add($objBtn)
         $x++
     }
-    # Positionierung und Groesse des Dialogfensters
-    $objForm.Size=New-Object System.Drawing.Size($w,$(80+$y*34))
+    # Positionierung und Groesse des Dialogfensters usw.
+    $objForm.AutoSize=$true
+    $objForm.AutoSizeMode="GrowAndShrink"
+    $objForm.SizeGripStyle="Hide"
     $objForm.StartPosition="CenterScreen"
+    $objForm.MinimizeBox = $False
+    $objForm.MaximizeBox = $False
     # Dialogfenster anzeigen
     [void] $objForm.ShowDialog()
 }
