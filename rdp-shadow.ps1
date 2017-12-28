@@ -23,7 +23,7 @@ $Sessions=@()
 # Wir definieren eine globale Variable fuer den Benutzernamen wie folgt:
 $global:Username=$Username # Das brauchen wir naemlich fuer ein eigenes Dialogfenster.
 # Falls kein Benutzername per Parameter übergeben wurde, wird er hier erfragt (Buttons)
-if($Username -eq "") {
+if($Username -eq "" -and $Sessions.Count -gt 0) {
     # Wir laden die Assemblies fuer eigene Formen / Fenster
     [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
     [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
@@ -75,4 +75,7 @@ $Sessions | Where-Object { $_.Username -eq $Username } | Foreach-Object {
 # Und wenn der Benutzername in der Liste nicht vorkommt, auhc entspr. Meldung ausgeben
 if($found -eq $false -and $Username -ne "") {
     [System.Windows.Forms.MessageBox]::Show("User '$Username' seems to be not logged on to $ComputerName.","Information",0,[System.Windows.Forms.MessageBoxIcon]::Information) >$null
+}
+elseif($Sessions.Count -eq 0) {
+    [System.Windows.Forms.MessageBox]::Show("There're no sessions to shadow on $ComputerName.","Information",0,[System.Windows.Forms.MessageBoxIcon]::Information) >$null
 }
