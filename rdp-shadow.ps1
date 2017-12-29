@@ -20,8 +20,10 @@ $Sessions=@()
         $Sessions+=$objSession
     }
 }
-# Wir definieren eine globale Variable fuer den Benutzernamen wie folgt:
-$global:Username=$Username # Das brauchen wir naemlich fuer ein eigenes Dialogfenster.
+# Wir definieren globale Variabeln. Das braucht man, damit ein eigenes Dialogfenster die Auswahl global greifbar abspeichern kann..
+$global:Username=$Username
+$global:Controls=$false
+$global:Prompt=$false
 # Falls kein Benutzername per Parameter übergeben wurde, wird er hier erfragt (Buttons)
 if($Username -eq "" -and $Sessions.Count -gt 0) {
     # Wir laden die Assemblies fuer eigene Formen / Fenster
@@ -47,6 +49,20 @@ if($Username -eq "" -and $Sessions.Count -gt 0) {
         $objForm.Controls.Add($objBtn)
         $x++
     }
+    # Checkboxen
+    $objCheckBox=New-Object System.Windows.Forms.CheckBox
+    $objCheckBox.Location=New-Object System.Drawing.Size(4,$(4+($y+1)*34))
+    $objCheckBox.AutoSize=$true
+    $objCheckBox.Text="Take control"
+    $objCheckBox.Checked=$global:Controls
+    $objCheckBox.Add_Click({$global:Controls=$this.Checked})
+    $objForm.Controls.Add($objCheckBox)
+    $objCheckBox=New-Object System.Windows.Forms.CheckBox
+    $objCheckBox.Location=New-Object System.Drawing.Size(100,$(4+($y+1)*34))
+    $objCheckBox.AutoSize=$true
+    $objCheckBox.Text="Ask user"
+    $objCheckBox.Checked=$global:Prompt
+    $objCheckBox.Add_Click({$global:Prompt=$this.Checked})
     # Positionierung und Groesse des Dialogfensters usw.
     $objForm.AutoSize=$true
     $objForm.AutoSizeMode="GrowAndShrink"
@@ -65,7 +81,14 @@ $Sessions | Where-Object { $_.Username -eq $Username } | Foreach-Object {
     # Und spiegel die Sitzung, sofern sie aktiv ist.
     if($_.Status -eq "Active") {
         $sid=$_.SessionID
-        iex "& mstsc /shadow:$sid /noconsentprompt"
+        $cmd="mstsc /v:$ComputerName /shadow:$sid"
+        if($global:Controls) {
+            $cmd="$cmd /control"
+        }
+        if($global:Prompt -ne $true) {
+            $cmd="$cmd /noconsentprompt"
+        }
+        iex "& $cmd"
     }
     # Ansonsten entspr. Ausgabe tätigen.
     else {
