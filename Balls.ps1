@@ -1,6 +1,10 @@
 Add-Type -AssemblyName System.Windows.Forms
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
+$OldCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+$OldUICulture = [System.Threading.Thread]::CurrentThread.CurrentUICulture
+[System.Threading.Thread]::CurrentThread.CurrentCulture = "en-US"
+[System.Threading.Thread]::CurrentThread.CurrentUICulture = "en-US"
 $global:Controls=@()
 function SpawnWindow {
     $objForm=new-object System.Windows.Forms.Form
@@ -19,10 +23,10 @@ function SpawnWindow {
     $objTimer.Add_Tick({
         ForEach($C in $objForm.Controls) {
             if($C -is [System.Windows.Forms.RadioButton]) {
-                $xdir=[convert]::ToInt32($C.AccessibleDescription,10)
-                $ydir=[convert]::ToInt32($C.AccessibleName,10)
-                $x=$C.Left
-                $y=$C.Top
+                $xdir=[convert]::ToDouble($C.AccessibleDescription)
+                $ydir=[convert]::ToDouble($C.AccessibleName)
+                $x=[convert]::ToDouble($C.Name)
+                $y=[convert]::ToDouble($C.AccessibleDefaultActionDescription)
                 $x+=$xdir
                 $y+=$ydir
                 if(($x+$C.Width) -gt $objForm.ClientSize.Width) {
@@ -45,9 +49,11 @@ function SpawnWindow {
                     $ydir*=-1
                     $y=0
                 }
-                $C.Location=new-object System.Drawing.Size($x,$y)
+                $C.Location=new-object System.Drawing.Size([math]::Round($x),[math]::Round($y))
                 $C.AccessibleDescription=$xdir
                 $C.AccessibleName=$ydir
+                $C.Name=$x
+                $C.AccessibleDefaultActionDescription=$y
             }
         }
     })
@@ -67,10 +73,14 @@ function SpawnBall($PosX,$PosY,$DirX,$DirY) {
     $objRadio.FlatStyle="Flat"
     $objRadio.AccessibleDescription=$DirX
     $objRadio.AccessibleName=$DirY
+    $objRadio.Name=$PosX
+    $objRadio.AccessibleDefaultActionDescription=$PosY
     $global:Controls+=$objRadio
 }
 $BallCount=Get-Random -Minimum 20 -Maximum 50
 1..$BallCount | forEach {
-    SpawnBall $(Get-Random -Minimum 0 -Maximum 310) $(Get-Random -Minimum 0 -Maximum 230) $(Get-Random -Minimum 1 -Maximum 6) $(Get-Random -Minimum 1 -Maximum 7)
+    SpawnBall $(Get-Random -Minimum 0 -Maximum 310) $(Get-Random -Minimum 0 -Maximum 230) $((Get-Random -Minimum 100 -Maximum 8000)/1000) $((Get-Random -Minimum 100 -Maximum 8000)/1000)
 }
 SpawnWindow
+[System.Threading.Thread]::CurrentThread.CurrentCulture = $OldCulture
+[System.Threading.Thread]::CurrentThread.CurrentUICulture = $OldUICulture
