@@ -54,8 +54,7 @@ $global:Sessions=@()
 $global:TempSes=@()
 $global:TempSrv=@()
 
-# This function will call a process with a timeout.
-# (Unfortunately not really reliable. Therefor we will let windows show, so user can close them if they take too long.)
+# This function will call a process with a timeout. (Unfortunately not really reliable)
 function ProcessTimeout($proc,$arg,$timeout=10000) {
     do {
         $r=Get-Random -Maximum 24000 -Minimum 23
@@ -121,22 +120,24 @@ function AddServers($file,$newsrv=$true) {
 function RefreshSessions($SrvListBox,$SesListBox) {
     if($SesListBox -is [System.Windows.Forms.DataGridView]) {
         $sesListBox.Rows.Clear()
-        if($SrvListBox -is [System.Windows.Forms.ListBox] -and $SrvListBox.SelectedItems.Count -gt 0 -and ($global:Sessions | Where-Object {$SrvListBox.SelectedItems -contains $_.Server}).Count -gt 0) {
+        if($SrvListBox -is [System.Windows.Forms.ListBox] -and $SrvListBox.SelectedItems.Count -gt 0) {
             $sc=$SesListBox.SortedColumn
             $sd=$SesLiStBox.SortOrder.ToString()
-            $global:Sessions | Where-Object {$SrvListBox.SelectedItems -contains $_.Server} | Foreach-Object {
-                $usr=$_.Username
-                $srv=$_.Server
-                $r=@($usr,$_.FirstName,$_.LastName,$_.Server,$_.Status)
-                $SesListBox.Rows.Add($r)
-                if($_.Status -ne "Active") {
-                    Foreach($c in $SesListBox.Rows[$($SesListBox.Rows.Count-1)].Cells) {
-                        $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,255,224,224)
+            Foreach($item in $SrvListBox.SelectedItems) {
+                $srv=$item.Split(" ")[0]
+                $global:Sessions | Where-Object {$_.Server -eq $srv} | Foreach-Object {
+                    $usr=$_.Username
+                    $r=@($usr,$_.FirstName,$_.LastName,$srv,$_.Status)
+                    $SesListBox.Rows.Add($r)
+                    if($_.Status -ne "Active") {
+                        Foreach($c in $SesListBox.Rows[$($SesListBox.Rows.Count-1)].Cells) {
+                            $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,255,224,224)
+                        }
                     }
-                }
-                elseif(($global:Servers | Where-Object {$_.Name -eq $srv}).IsNewServer -ne $true) {
-                    Foreach($c in $SesListBox.Rows[$($SesListBox.Rows.Count-1)].Cells) {
-                        $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,224,224,255)
+                    elseif(($global:Servers | Where-Object {$_.Name -eq $srv}).IsNewServer -ne $true) {
+                        Foreach($c in $SesListBox.Rows[$($SesListBox.Rows.Count-1)].Cells) {
+                            $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,224,224,255)
+                        }
                     }
                 }
             }
@@ -152,7 +153,12 @@ function RefreshServers($SrvListBox,$SesListBox) {
     if($SrvListBox -is [System.Windows.Forms.ListBox]) {
         $i=$SrvListBox.SelectedIndex
         $SrvListBox.Items.Clear()
-        $SrvListBox.Items.AddRange(($global:Servers).Name)
+        Foreach($srv in ($global:Servers).Name) {
+            $cnta=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -eq "Active"}).Count
+            $cntd=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -ne "Active"}).Count
+            [void]$SrvListBox.Items.Add("$srv [ $cnta | $cntd ]")
+        }
+        #$SrvListBox.Items.AddRange(($global:Servers).Name)
         $SrvListBox.SelectedIndex=$i
         if($SesListBox -is [System.Windows.Forms.DataGridView]) {
             RefreshSessions $SrvListBox $SesListBox
@@ -300,11 +306,18 @@ $objDisBtn.Add_Click({
         Foreach($row in $objSesLst.SelectedRows) {
             $usr=$row.Cells[0].Value
             $srv=$row.Cells[3].Value
-            $sid=($global:Sessions | Where-Object {$_.Server -eq $srv -and $_.Username -eq $usr}).SessionID
+            $ses=$global:Sessions | Where-Object {$_.Server -eq $srv -and $_.Username -eq $usr}
+            $sid=$ses.SessionID
             write-host "Logging off $usr from $srv (SessionID $sid)..."
             iex "& logoff $sid /server:$srv"
+            write-host "Finished."
+            $global:TempSes=@()
+            $global:Sessions | Where-Object {$_ -ne $ses} | ForEach-Object {
+                $global:TempSes+=$_
+            }
+            $global:Sessions=$global:TempSes
         }
-#        RefreshData $objTimer
+        RefreshServers $objSrvLst $objSesLst
     }
 })
 $objForm.Controls.Add($objDisBtn)
