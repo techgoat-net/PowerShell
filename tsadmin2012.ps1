@@ -1,7 +1,7 @@
 ###########################################
 # Windows Server 2012 R2+ tsadmin PS tool #
 # Version 0.2 - written by Nico Domagalla #
-# Date: 2018-01-11                        #
+# Date: 2018-01-12                        #
 ###########################################
 
 # We load some libraries for drawing forms...
@@ -151,15 +151,21 @@ function RefreshSessions($SrvListBox,$SesListBox) {
 # This function will refresh the server list view and the session list view.
 function RefreshServers($SrvListBox,$SesListBox) {
     if($SrvListBox -is [System.Windows.Forms.ListBox]) {
-        $i=$SrvListBox.SelectedIndex
+        $idx=@()
+        for($i=0;$i -lt $SrvListBox.Items.Count;$i++) {
+            if($SrvListBox.GetSelected($i)) {
+                $idx+=$i
+            }
+        }
         $SrvListBox.Items.Clear()
         Foreach($srv in ($global:Servers).Name) {
             $cnta=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -eq "Active"}).Count
             $cntd=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -ne "Active"}).Count
             [void]$SrvListBox.Items.Add("$srv [ $cnta | $cntd ]")
         }
-        #$SrvListBox.Items.AddRange(($global:Servers).Name)
-        $SrvListBox.SelectedIndex=$i
+        Foreach ($i in $idx) {
+            $SrvListBox.SetSelected($i,$true)
+        }
         if($SesListBox -is [System.Windows.Forms.DataGridView]) {
             RefreshSessions $SrvListBox $SesListBox
         }
@@ -310,13 +316,13 @@ $objDisBtn.Add_Click({
             $sid=$ses.SessionID
             write-host "Logging off $usr from $srv (SessionID $sid)..."
             iex "& logoff $sid /server:$srv"
-            write-host "Finished."
             $global:TempSes=@()
             $global:Sessions | Where-Object {$_ -ne $ses} | ForEach-Object {
                 $global:TempSes+=$_
             }
             $global:Sessions=$global:TempSes
         }
+        write-host "Finished."
         RefreshServers $objSrvLst $objSesLst
     }
 })
