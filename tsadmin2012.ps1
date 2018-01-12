@@ -107,7 +107,7 @@ function AddSessions($srv,$pattern=$false) {
 # This function will read servers into array
 function AddServers($file,$newsrv=$true) {
     if(Test-Path $file) {
-        Get-Content $file | Sort | Foreach {
+        Get-Content $file | Foreach {
             $objServer=New-Object System.Object
             $objServer | Add-Member -MemberType NoteProperty -Name Name -Value $_
             $objServer | Add-Member -MemberType NoteProperty -Name IsNewServer -Value $newsrv
@@ -158,7 +158,7 @@ function RefreshServers($SrvListBox,$SesListBox) {
             }
         }
         $SrvListBox.Items.Clear()
-        Foreach($srv in ($global:Servers).Name) {
+        Foreach($srv in ($global:Servers | Sort-Object {$_.Name}).Name) {
             $cnta=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -eq "Active"}).Count
             $cntd=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -ne "Active"}).Count
             [void]$SrvListBox.Items.Add("$srv [ $cnta | $cntd ]")
@@ -220,7 +220,7 @@ $objForm.Controls.Add($objLbl)
 # This is the list of servers
 $objSrvLst=New-Object System.Windows.Forms.ListBox
 $objSrvLst.Location=New-Object System.Drawing.Size(4,21)
-$objSrvLst.Size=New-Object System.Drawing.Size(120,480)
+$objSrvLst.Size=New-Object System.Drawing.Size(160,480)
 $objSrvLst.BorderStyle="FixedSingle"
 $objSrvLst.SelectionMode="MultiExtended"
 $objSrvLst.Add_SelectedIndexChanged({
