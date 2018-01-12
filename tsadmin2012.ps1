@@ -152,6 +152,7 @@ function RefreshSessions($SrvListBox,$SesListBox) {
 function RefreshServers($SrvListBox,$SesListBox) {
     if($SrvListBox -is [System.Windows.Forms.ListBox]) {
         $idx=@()
+        $SrvListBox.Remove_SelectedIndexChanged($global:SelectionChangedFunc)
         for($i=0;$i -lt $SrvListBox.Items.Count;$i++) {
             if($SrvListBox.GetSelected($i)) {
                 $idx+=$i
@@ -169,6 +170,7 @@ function RefreshServers($SrvListBox,$SesListBox) {
         if($SesListBox -is [System.Windows.Forms.DataGridView]) {
             RefreshSessions $SrvListBox $SesListBox
         }
+        $SrvListBox.Add_SelectedIndexChanged($global:SelectionChangedFunc)
     }
 }
 
@@ -218,19 +220,20 @@ $objLbl.Text="Server"
 $objForm.Controls.Add($objLbl)
 
 # This is the list of servers
-$objSrvLst=New-Object System.Windows.Forms.ListBox
-$objSrvLst.Location=New-Object System.Drawing.Size(4,21)
-$objSrvLst.Size=New-Object System.Drawing.Size(160,480)
-$objSrvLst.BorderStyle="FixedSingle"
-$objSrvLst.SelectionMode="MultiExtended"
-$objSrvLst.Add_SelectedIndexChanged({
+$global:SelectionChangedFunc={
     RefreshSessions $this $objSesLst
     $objSesLst.ClearSelection()
     $objDisBtn.Enabled=$false
     $objMirBtn.Enabled=$false
     $objMsgBox.Enabled=$false
     $objMsgBtn.Enabled=$false
-})
+}
+$objSrvLst=New-Object System.Windows.Forms.ListBox
+$objSrvLst.Location=New-Object System.Drawing.Size(4,21)
+$objSrvLst.Size=New-Object System.Drawing.Size(160,480)
+$objSrvLst.BorderStyle="FixedSingle"
+$objSrvLst.SelectionMode="MultiExtended"
+$objSrvLst.Add_SelectedIndexChanged($global:SelectionChangedFunc)
 $objForm.Controls.Add($objSrvLst)
 
 $objLbl=New-Object System.Windows.Forms.Label
