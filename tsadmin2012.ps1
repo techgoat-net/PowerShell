@@ -405,7 +405,7 @@ $objTimer.Add_Tick({
 })
 
 # A nice looking function (visuability is everything...)
-$objForm.Add_Resize({
+$ResizeFunc={
     $objSrvLst.Height=$this.ClientSize.Height-32
     $objSesLst.Height=$objSrvLst.Height
     $objMsgBox.Height=$objSrvLst.Height-112
@@ -415,7 +415,9 @@ $objForm.Add_Resize({
     $objMirBtn.Width=$objRefBtn.Width
     $objMsgBox.Width=$objRefBtn.Width
     $objMsgBtn.Width=$objRefBtn.Width
-})
+}
+$objForm.Add_Resize($ResizeFunc)
+$objForm.Add_Shown($ResizeFunc)
 
 #Show the form
 [void]$objForm.ShowDialog()
