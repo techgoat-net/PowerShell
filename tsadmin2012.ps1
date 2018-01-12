@@ -125,7 +125,7 @@ function RefreshSessions($SrvListBox,$SesListBox) {
             $sd=$SesLiStBox.SortOrder.ToString()
             Foreach($item in $SrvListBox.SelectedItems) {
                 $srv=$item.Split(" ")[0]
-                $global:Sessions | Where-Object {$_.Server -eq $srv} | Foreach-Object {
+                $global:Sessions | Where-Object {$_.Server -eq $srv} | Sort-Object {$_.Username} | Foreach-Object {
                     $usr=$_.Username
                     $r=@($usr,$_.FirstName,$_.LastName,$srv,$_.Status)
                     $SesListBox.Rows.Add($r)
@@ -172,7 +172,7 @@ function RefreshServers($SrvListBox,$SesListBox) {
     }
 }
 
-# This cfunction will read all sessions...
+# This function will read all sessions...
 function RefreshData($Timer) {
     if($Timer -is [System.Windows.Forms.Timer]) {
         $e=$Timer.Enabled
@@ -286,18 +286,19 @@ $objSesLst.Add_SelectionChanged({
 $objForm.Controls.Add($objSesLst)
 
 # And now the control elements: Buttons, message box...
+$RefreshFunc={
+    $this.Enabled=$false
+    RefreshData $objTimer
+    RefreshServers $objSrvLst $objSesLst
+    $this.Enabled=$true
+}
 $objRefBtn=New-Object System.Windows.Forms.Button
 $objRefBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$objSesLst.Top)
 $objRefBtn.Size=New-Object System.Drawing.Size(160,24)
 $objRefBtn.Text="Refresh"
 $objRefBtn.Enabled=$true
 $objRefBtn.FlatStyle="Flat"
-$objRefBtn.Add_Click({
-    $this.Enabled=$false
-    RefreshData $objTimer
-    RefreshServers $objSrvLst $objSesLst
-    $this.Enabled=$true
-})
+$objRefBtn.Add_Click($RefreshFunc)
 $objForm.Controls.Add($objRefBtn)
 
 $objDisBtn=New-Object System.Windows.Forms.Button
@@ -397,12 +398,7 @@ $objTimer=New-Object System.Windows.Forms.Timer
 $objTimer.Interval=600000
 #$objTimer.Enabled=$true
 $objTimer.Enabled=$false
-$objTimer.Add_Tick({
-    $objRefBtn.Enabled=$false
-    RefreshData $this
-    RefreshServers $objSrvLst $objSesLst
-    $objRefBtn.Enabled=$true
-})
+$objTimer.Add_Tick($RefreshFunc)
 
 # A nice looking function (visuability is everything...)
 $ResizeFunc={
