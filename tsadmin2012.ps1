@@ -1,7 +1,7 @@
 ###########################################
 # Windows Server 2012 R2+ tsadmin PS tool #
-# Version 0.2 - written by Nico Domagalla #
-# Date: 2018-01-12                        #
+# Version 0.3 - written by Nico Domagalla #
+# Date: 2018-01-15                        #
 ###########################################
 
 # We load some libraries for drawing forms...
@@ -116,8 +116,26 @@ function AddServers($file,$newsrv=$true) {
     }
 }
 
+# This function will display information in status bar
+function RefreshStatusBar($SrvListBox,$SesListBox,$StatusBar) {
+    if($SrvListBox -is [System.Windows.Forms.ListBox] -and $SesListBox -is [System.Windows.Forms.DataGridView] -and $StatusBar -is [System.Windows.Forms.StatusBar]) {
+        $srvcnt=$SrvListBox.Items.Count
+        $srvsel=$SrvListBox.SelectedItems.Count
+        $sescnt=$SesListBox.Rows.Count
+        $sessel=$SesListBox.SelectedRows.Count
+        $sesact=($SesListBox.Rows | Where-Object { $_.Cells[4].Value -eq "Active" }).Count
+        $sesina=($SesListBox.Rows | Where-Object { $_.Cells[4].Value -ne "Active" }).Count
+        if($SesListBox.Rows.Count -eq 0) {
+            $StatusBar.Text="$srvcnt Servers ($srvsel selected)"
+        }
+        else {
+            $StatusBar.Text="$srvcnt Servers ($srvsel selected) - $sescnt Sessions ($sessel selected, $sesact active, $sesina inactive)"
+        }
+    }
+}
+
 # These functions will fill the session list view
-function RefreshSessions($SrvListBox,$SesListBox) {
+function RefreshSessions($SrvListBox,$SesListBox,$StatusBar=$null) {
     if($SesListBox -is [System.Windows.Forms.DataGridView]) {
         $sesListBox.Rows.Clear()
         if($SrvListBox -is [System.Windows.Forms.ListBox] -and $SrvListBox.SelectedItems.Count -gt 0) {
@@ -145,11 +163,14 @@ function RefreshSessions($SrvListBox,$SesListBox) {
                 $SesListBox.Sort($sc,$sd)
             }
         }
+        if($StatusBar -is [System.Windows.Forms.StatusBar]) {
+            RefreshStatusBar $SrvListBox $SesListBox $StatusBar
+        }
     }
 }
 
 # This function will refresh the server list view and the session list view.
-function RefreshServers($SrvListBox,$SesListBox) {
+function RefreshServers($SrvListBox,$SesListBox,$StatusBar=$null) {
     if($SrvListBox -is [System.Windows.Forms.ListBox]) {
         $idx=@()
         $SrvListBox.Remove_SelectedIndexChanged($global:SelectionChangedFunc)
@@ -168,7 +189,7 @@ function RefreshServers($SrvListBox,$SesListBox) {
             $SrvListBox.SetSelected($i,$true)
         }
         if($SesListBox -is [System.Windows.Forms.DataGridView]) {
-            RefreshSessions $SrvListBox $SesListBox
+            RefreshSessions $SrvListBox $SesListBox $StatusBar
         }
         $SrvListBox.Add_SelectedIndexChanged($global:SelectionChangedFunc)
     }
@@ -221,7 +242,7 @@ $objForm.Controls.Add($objLbl)
 
 # This is the list of servers
 $global:SelectionChangedFunc={
-    RefreshSessions $this $objSesLst
+    RefreshSessions $objSrvLst $objSesLst $objStatBar
     $objSesLst.ClearSelection()
     $objDisBtn.Enabled=$false
     $objMirBtn.Enabled=$false
@@ -285,6 +306,7 @@ $objSesLst.Add_SelectionChanged({
     $objMsgBtn.Enabled=$($AllMessageable -and $objMsgBox.Text.Trim() -ne "")
     $objMirBtn.Enabled=$AllMirrorable
     $objDisBtn.Enabled=$($this.SelectedRows.Count -gt 0)
+    RefreshStatusBar $objSrvLst $objSesLst $objStatBar
 })
 $objForm.Controls.Add($objSesLst)
 
@@ -292,7 +314,7 @@ $objForm.Controls.Add($objSesLst)
 $RefreshFunc={
     $this.Enabled=$false
     RefreshData $objTimer
-    RefreshServers $objSrvLst $objSesLst
+    RefreshServers $objSrvLst $objSesLst $objStatBar
     $this.Enabled=$true
 }
 $objRefBtn=New-Object System.Windows.Forms.Button
@@ -327,7 +349,7 @@ $objDisBtn.Add_Click({
             $global:Sessions=$global:TempSes
         }
         write-host "Finished."
-        RefreshServers $objSrvLst $objSesLst
+        RefreshServers $objSrvLst $objSesLst $objStatBar
     }
 })
 $objForm.Controls.Add($objDisBtn)
@@ -386,6 +408,9 @@ $objMsgBtn.Add_Click({
 })
 $objForm.Controls.Add($objMsgBtn)
 
+$objStatBar=New-Object System.Windows.Forms.StatusBar
+$objForm.Controls.Add($objStatBar)
+
 # A workaround to disable autosize of the form but keep the current window size...
 $w=$objForm.Width
 $h=$objForm.Height
@@ -394,7 +419,7 @@ $objForm.Width=$w
 $objForm.Height=$h
 
 # OK, now initially fill the lists with values...
-RefreshServers $objSrvLst $objSesLst
+RefreshServers $objSrvLst $objSesLst $objStatBar
 
 # A timer to automatically refresh (currently disabled)
 $objTimer=New-Object System.Windows.Forms.Timer
@@ -405,15 +430,21 @@ $objTimer.Add_Tick($RefreshFunc)
 
 # A nice looking function (visuability is everything...)
 $ResizeFunc={
-    $objSrvLst.Height=$this.ClientSize.Height-32
+    $objSrvLst.Height=$objForm.ClientSize.Height-$objStatBar.Height-$objLbl.Height-8
     $objSesLst.Height=$objSrvLst.Height
+    $objSesLst.Width=$objForm.ClientSize.Width-16-$objSrvLst.Width-120
     $objMsgBox.Height=$objSrvLst.Height-112
     $objMsgBtn.Top=$objMsgBox.Top+$objMsgBox.Height+4
-    $objRefBtn.Width=$this.ClientSize.Width-8-$objSesLst.Left-$objSesLst.Width
+    $objRefBtn.Width=$objForm.ClientSize.Width-8-$objSesLst.Left-$objSesLst.Width
     $objDisBtn.Width=$objRefBtn.Width
     $objMirBtn.Width=$objRefBtn.Width
     $objMsgBox.Width=$objRefBtn.Width
     $objMsgBtn.Width=$objRefBtn.Width
+    $objRefBtn.Left=$objSesLst.Left+$objSesLst.Width+4
+    $objDisBtn.Left=$objRefBtn.Left
+    $objMirBtn.Left=$objRefBtn.Left
+    $objMsgBox.Left=$objRefBtn.Left
+    $objMsgBtn.Left=$objRefBtn.Left
 }
 $objForm.Add_Resize($ResizeFunc)
 $objForm.Add_Shown($ResizeFunc)
