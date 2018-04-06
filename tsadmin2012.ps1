@@ -1,7 +1,7 @@
 ###########################################
 # Windows Server 2012 R2+ tsadmin PS tool #
-# Version 0.3 - written by Nico Domagalla #
-# Date: 2018-01-15                        #
+# Version 0.6 - written by Nico Domagalla #
+# Date: 2018-04-06                        #
 ###########################################
 
 # We load some libraries for drawing forms...
@@ -46,96 +46,79 @@ Add-Type -TypeDefinition $code -ReferencedAssemblies System.Drawing
 
 # Now some global vars ...
 $global:FilePath="C:\Scripts\terminalserver"
-$global:FileNewServers="$global:FilePath\2012servers.txt"
-$global:FileOldServers="$global:FilePath\2008servers.txt"
+$global:SrvFile=Import-Csv "$global:FilePath\Servers.csv" -Delimiter ";"
+# CSV format: Name;Grp;Shadow
 $global:TempDir="C:\Temp"
 $global:Servers=@()
 $global:Sessions=@()
 $global:TempSes=@()
 $global:TempSrv=@()
 
-# This function will call a process with a timeout. (Unfortunately not really reliable)
-function ProcessTimeout($proc,$arg,$timeout=10000) {
-    do {
-        $r=Get-Random -Maximum 24000 -Minimum 23
-        $tf="$global:TempDir\$r.txt"
-    }
-    while(Test-Path $tf)
-    $p=Start-Process -FilePath $proc -ArgumentList $arg -RedirectStandardOutput $tf -Passthru
+# This new script block will help to retrieve data asynchronously.
+$global:ProcessTimeoutFunc={
+    param($srv,$op)
+    $p=Start-Process -FilePath "qwinsta" -ArgumentList "/server:$srv" -RedirectStandardOutput $op -Passthru -NoNewWindow
     $to=$null
-    $p | Wait-Process -Timeout $timeout -ea 0 -ev $to
-    $ret=Get-Content $tf
-    del $tf
-    if($to) {
-        $p | kill
-        return $false
-    }
-    return $ret
+    $p | Wait-Process -Timeout 10000 -ea 0 -ev $to
 }
 # A workaround in order to catch users with umlauts and other spec chars as well (Yes, it is an odd function...)
 function ConvUmlauts($str) {
     return $str.Replace("`”","ö").Replace("á","ß").Replace(" ","á")
 }
 # This function will look up sessions of a given server and probably with a given pattern to search in usernames...
-function AddSessions($srv,$pattern=$false) {
-    #$r=ProcessTimeout "cmd.exe" "/C `"qwinsta /server:$srv`"" 2000
-    $r=ProcessTimeout "qwinsta" "/server:$srv" 2000
+function AddSessions($f,$srv) {
+    $r=Get-Content $f
     if($r -ne $false) {
         $r | Where {$_ -ne ""} | foreach {
             $usr=ConvUmlauts($_.substring(19,22).trim().ToLower())
             if($usr -ne "" -and $usr -ne "USERNAME" -and $usr -ne $env:username) {
                 $ad=Get-ADUser $usr | Select SamAccountName,SurName,GivenName
-                if($pattern -eq $false -or $ad.SamAccountName -like "*$pattern*" -or $ad.Surname -like "*$pattern*" -or $ad.GivenName -like "*$pattern*") {
-                    $objSession=New-Object System.Object
-                    $objSession | Add-Member -MemberType NoteProperty -Name Server -Value $srv
-                    $objSession | Add-Member -MemberType NoteProperty -Name SessionID -Value $_.substring(40,8).trim()
-                    $objSession | Add-Member -MemberType NoteProperty -Name Type -Value $_.substring(1,3).trim()
-                    $objSession | Add-Member -MemberType NoteProperty -Name Username -Value $usr
-                    $objSession | Add-Member -MemberType NoteProperty -Name FirstName -Value $ad.GivenName
-                    $objSession | Add-Member -MemberType NoteProperty -Name LastName -Value $ad.Surname
-                    $objSession | Add-Member -MemberType NoteProperty -Name Status -Value $_.substring(48,8).trim()
-                    $global:TempSes+=$objSession
-                }
+                $objSession=New-Object System.Object
+                $objSession | Add-Member -MemberType NoteProperty -Name Server -Value $srv
+                $objSession | Add-Member -MemberType NoteProperty -Name SessionID -Value $_.substring(40,8).trim()
+                $objSession | Add-Member -MemberType NoteProperty -Name Type -Value $_.substring(1,3).trim()
+                $objSession | Add-Member -MemberType NoteProperty -Name Username -Value $usr
+                $objSession | Add-Member -MemberType NoteProperty -Name FirstName -Value $ad.GivenName
+                $objSession | Add-Member -MemberType NoteProperty -Name LastName -Value $ad.Surname
+                $objSession | Add-Member -MemberType NoteProperty -Name Status -Value $_.substring(48,8).trim()
+                $global:TempSes+=$objSession
             }
         }
     }
-    else {
-        write-host "$srv timed out." -ForegroundColor Red
-    }
-}
-
-# This function will read servers into array
-function AddServers($file,$newsrv=$true) {
-    if(Test-Path $file) {
-        Get-Content $file | Foreach {
-            $objServer=New-Object System.Object
-            $objServer | Add-Member -MemberType NoteProperty -Name Name -Value $_
-            $objServer | Add-Member -MemberType NoteProperty -Name IsNewServer -Value $newsrv
-            $global:TempSrv+=$objServer
-        }
-    }
+#    else {
+#        write-host "$srv timed out." -ForegroundColor Red
+#    }
 }
 
 # This function will display information in status bar
 function RefreshStatusBar($SrvListBox,$SesListBox,$StatusBar) {
-    if($SrvListBox -is [System.Windows.Forms.ListBox] -and $SesListBox -is [System.Windows.Forms.DataGridView] -and $StatusBar -is [System.Windows.Forms.StatusBar]) {
-        $srvcnt=$SrvListBox.Items.Count
-        $srvsel=$SrvListBox.SelectedItems.Count
-        $sescnt=$SesListBox.Rows.Count
-        $sessel=$SesListBox.SelectedRows.Count
-        $sesact=($SesListBox.Rows | Where-Object { $_.Cells[4].Value -eq "Active" }).Count
-        $sesina=($SesListBox.Rows | Where-Object { $_.Cells[4].Value -ne "Active" }).Count
-        if($SesListBox.Rows.Count -eq 0) {
-            $StatusBar.Text="$srvcnt Servers ($srvsel selected)"
+    if($SesListBox -is [System.Windows.Forms.DataGridView] -and $StatusBar -is [System.Windows.Forms.StatusBar]) {
+        $srvcnt=0
+        $srvsel=0
+        $srvtxt=""
+        $sestxt=""
+        $delim=""
+        if($SesListBox.Rows.Count -gt 0) {
+            $sescnt=$SesListBox.Rows.Count
+            $sessel=$SesListBox.SelectedRows.Count
+            $sesact=($SesListBox.Rows | Where-Object { $_.Cells[4].Value -eq "Active" }).Count
+            $sesina=($SesListBox.Rows | Where-Object { $_.Cells[4].Value -ne "Active" }).Count
+            $sestxt="$sescnt Sessions ($sessel selected, $sesact active, $sesina inactive)"
         }
-        else {
-            $StatusBar.Text="$srvcnt Servers ($srvsel selected) - $sescnt Sessions ($sessel selected, $sesact active, $sesina inactive)"
+        if($SrvListBox -is [System.Windows.Forms.ListBox]) {
+            $srvcnt=$SrvListBox.Items.Count
+            $srvsel=$SrvListBox.SelectedItems.Count
+            $srvtxt="$srvcnt Servers ($srvsel selected)"
         }
+        if($srvtxt -ne "" -and $sestxt -ne "") {
+            $delim=" - "
+        }
+        $StatusBar.Text="$srvtxt$delim$sestxt"
     }
 }
 
 # These functions will fill the session list view
-function RefreshSessions($SrvListBox,$SesListBox,$StatusBar=$null) {
+function RefreshSessions($SrvListBox,$SesListBox,$StatusBar=$null,$pattern=$null) {
     if($SesListBox -is [System.Windows.Forms.DataGridView]) {
         $sesListBox.Rows.Clear()
         if($SrvListBox -is [System.Windows.Forms.ListBox] -and $SrvListBox.SelectedItems.Count -gt 0) {
@@ -152,7 +135,7 @@ function RefreshSessions($SrvListBox,$SesListBox,$StatusBar=$null) {
                             $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,255,224,224)
                         }
                     }
-                    elseif(($global:Servers | Where-Object {$_.Name -eq $srv}).IsNewServer -ne $true) {
+                    elseif(($global:Servers | Where-Object {$_.Name -eq $srv}).AllowShadow -ne $true) {
                         Foreach($c in $SesListBox.Rows[$($SesListBox.Rows.Count-1)].Cells) {
                             $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,224,224,255)
                         }
@@ -169,29 +152,58 @@ function RefreshSessions($SrvListBox,$SesListBox,$StatusBar=$null) {
     }
 }
 
-# This function will refresh the server list view and the session list view.
-function RefreshServers($SrvListBox,$SesListBox,$StatusBar=$null) {
-    if($SrvListBox -is [System.Windows.Forms.ListBox]) {
-        $idx=@()
-        $SrvListBox.Remove_SelectedIndexChanged($global:SelectionChangedFunc)
-        for($i=0;$i -lt $SrvListBox.Items.Count;$i++) {
-            if($SrvListBox.GetSelected($i)) {
-                $idx+=$i
+# This function will search for a pattern in listed sessions
+function SearchSessions($SesListBox,$StatusBar,$pattern) {
+    if($SesListBox -is [System.Windows.Forms.DataGridView]) {
+        $sesListBox.Rows.Clear()
+        $global:Sessions | Where-Object {$_.Username -like "*$pattern*" -or $_.FirstName -like "*$pattern*" -or $_.LastName -like "*$pattern*"} | Foreach-Object {
+            $srv=$_.Server
+            $usr=$_.Username
+            $r=@($usr,$_.FirstName,$_.LastName,$srv,$_.Status)
+            $SesListBox.Rows.Add($r)
+            if($_.Status -ne "Active") {
+                Foreach($c in $SesListBox.Rows[$($SesListBox.Rows.Count-1)].Cells) {
+                    $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,255,224,224)
+                }
+            }
+            elseif(($global:Servers | Where-Object {$_.Name -eq $srv}).AllowShadow -ne $true) {
+                Foreach($c in $SesListBox.Rows[$($SesListBox.Rows.Count-1)].Cells) {
+                    $c.Style.BackColor=[System.Drawing.Color]::FromArgb(255,224,224,255)
+                }
             }
         }
-        $SrvListBox.Items.Clear()
-        Foreach($srv in ($global:Servers | Sort-Object {$_.Name}).Name) {
-            $cnta=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -eq "Active"}).Count
-            $cntd=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -ne "Active"}).Count
-            [void]$SrvListBox.Items.Add("$srv [ $cnta | $cntd ]")
+        if($StatusBar -is [System.Windows.Forms.StatusBar]) {
+            RefreshStatusBar $null $SesListBox $StatusBar
         }
-        Foreach ($i in $idx) {
-            $SrvListBox.SetSelected($i,$true)
+    }
+}
+
+# This function will refresh the server list view and the session list view.
+function RefreshServers($TabControl,$SesListBox,$StatusBar=$null) {
+    if($TabControl -is [System.Windows.Forms.TabControl]) {
+        for($i=0;$i -lt $($TabControl.TabCount-1);$i++) {
+            $SrvListBox=$TabControl.TabPages.Item($i).Controls[0]
+            $SrvListBox.Remove_SelectedIndexChanged($global:SelectionChangedFunc)
+            $idx=@()
+            for($z=0;$z -lt $SrvListBox.Items.Count;$z++) {
+                if($SrvListBox.GetSelected($z)) {
+                    $idx+=$z
+                }
+            }
+            $SrvListBox.Items.Clear()
+            Foreach($srv in ($global:Servers | Where-Object {$_.TabIndex -eq $i} | Sort-Object {$_.Name}).Name) {
+                $cnta=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -eq "Active"}).Count
+                $cntd=($global:Sessions | where-object {$_.Server -eq $srv -and $_.Status -ne "Active"}).Count
+                [void]$SrvListBox.Items.Add("$srv [ $cnta | $cntd ]")
+            }
+            Foreach ($z in $idx) {
+                $SrvListBox.SetSelected($z,$true)
+            }
+            if($i -eq $TabControl.SelectedIndex -and $SesListBox -is [System.Windows.Forms.DataGridView]) {
+                RefreshSessions $SrvListBox $SesListBox $StatusBar
+            }
+            $SrvListBox.Add_SelectedIndexChanged($global:SelectionChangedFunc)
         }
-        if($SesListBox -is [System.Windows.Forms.DataGridView]) {
-            RefreshSessions $SrvListBox $SesListBox $StatusBar
-        }
-        $SrvListBox.Add_SelectedIndexChanged($global:SelectionChangedFunc)
     }
 }
 
@@ -203,16 +215,48 @@ function RefreshData($Timer) {
     }
     $global:TempSrv=@()
     $global:TempSes=@()
-    Write-Host "Reading servers from list..."
-    # Reading the 2008 R2 servers (Those you can't shadow from 2012 R2)
-    AddServers $global:FileOldServers $false
-    # Reading the new servers...
-    AddServers $global:FileNewServers
-    Write-host "Reading current user sessions..."
-    $global:TempSrv | Foreach-Object {
-        Write-Host $_.Name
-        AddSessions $_.Name
+    $tabs=$global:SrvFile | Group-Object { $_.Grp } | Sort-Object { $_.Name }
+    do {
+        $r=Get-Random -Maximum 24000 -Minimum 23
+        $tf="$global:TempDir\$r"
     }
+    while(Test-Path $tf)
+    mkdir $tf >$null 2>$null
+    Write-Host "Reading servers from list..."
+    for($i=0;$i -lt $tabs.Count;$i++) {
+        $global:SrvFile | Where-Object { $_.Grp -eq $tabs[$i].Name } | Foreach-Object {
+            $srv=$_.Name
+            $f="$tf\$srv.txt"
+            set-content $f ""
+            $shadow=$false
+            if($_.Shadow -eq 1) {
+                $shadow=$true
+            }
+            $objServer=New-Object System.Object
+            $objServer | Add-Member -MemberType NoteProperty -Name Name -Value $srv
+            $objServer | Add-Member -MemberType NoteProperty -Name TabIndex -Value $i
+            $objServer | Add-Member -MemberType NoteProperty -Name AllowShadow -Value $shadow
+            $global:TempSrv+=$objServer
+            Start-Job -ScriptBlock $global:ProcessTimeoutFunc -ArgumentList @($srv,$f) -Name "qwinsta_$srv" >$null 2>$null
+        }
+    }
+    write-host "Waiting 5 seconds for data..."
+    Start-Sleep -Seconds 5
+    Write-host "Retrieving sessions..."
+    $global:TempSrv | Foreach-Object {
+        $srv=$_.Name
+        $f="$tf\$srv.txt"
+        if(Test-Path $f) {
+            AddSessions $f $srv
+            del $f 2>$null
+            if(Test-Path $f) {
+                write-host "$srv timed out."
+                Remove-Job -Name "qwinsta_$srv" -Force -Confirm:$false
+                del $f 2>$null
+            }
+        }
+    }
+    Remove-Item $tf -Recurse -Force 2>$null
     $global:Servers=$global:TempSrv
     $global:Sessions=$global:TempSes
     write-host "Finished."
@@ -228,45 +272,90 @@ RefreshData
 $objForm=new-Object System.Windows.Forms.Form
 $objForm.Icon=[System.IconExtractor]::Extract("shell32.dll",89,$false)
 $objForm.Text="TS Admin 2012 by Nico Domagalla"
-$objForm.AutoSize=$true
-$objForm.AutoSizeMode="GrowAndShrink"
 $objForm.SizeGripStyle="Show"
 $objForm.StartPosition="CenterScreen"
 $objForm.MinimumSize=New-Object System.Drawing.Size(800,320)
+$objForm.Size=New-Object System.Drawing.Size(800,520)
 
-$objLbl=New-Object System.Windows.Forms.Label
-$objLbl.Location=New-Object System.Drawing.Size(4,4)
-$objLbl.AutoSize=$true
-$objLbl.Text="Server"
-$objForm.Controls.Add($objLbl)
+$objStatBar=New-Object System.Windows.Forms.StatusBar
+$objForm.Controls.Add($objStatBar)
 
-# This is the list of servers
+# A tab view for different server types, and search tab
+$objSrvTab=New-Object System.Windows.Forms.TabControl
+$objSrvTab.Appearance="Normal"
+$objSrvTab.Alignment="Left"
+$global:SrvFile | Group-Object { $_.Grp } | Sort-Object { $_.Name } | Foreach-Object {
+    $objSrvTab.TabPages.Add($_.Name);
+}
+$objSrvTab.TabPages.Add("Search")
+$objSrvTab.Add_SelectedIndexChanged({
+    $objStatBar.Text=""
+    if($this.SelectedIndex -lt $($this.TabCount-1)) {
+        RefreshSessions $this.TabPages.Item($this.SelectedIndex).Controls[0] $objSesLst $objStatBar
+    } else {
+        if($objSearchTxt.Text.Trim() -eq "") {
+            $objSesLst.Rows.Clear()
+        }
+        else {
+            SearchSessions $objSesLst $objStatBar $objSearchTxt.Text.Trim()
+        }
+        $objSearchTxt.Focus()
+    }
+})
+$objForm.Controls.Add($objSrvTab)
+
+# These are the lists of servers
 $global:SelectionChangedFunc={
-    RefreshSessions $objSrvLst $objSesLst $objStatBar
+    RefreshSessions $this $objSesLst $objStatBar
     $objSesLst.ClearSelection()
     $objDisBtn.Enabled=$false
     $objMirBtn.Enabled=$false
     $objMsgBox.Enabled=$false
     $objMsgBtn.Enabled=$false
 }
-$objSrvLst=New-Object System.Windows.Forms.ListBox
-$objSrvLst.Location=New-Object System.Drawing.Size(4,21)
-$objSrvLst.Size=New-Object System.Drawing.Size(160,480)
-$objSrvLst.BorderStyle="FixedSingle"
-$objSrvLst.SelectionMode="MultiExtended"
-$objSrvLst.Add_SelectedIndexChanged($global:SelectionChangedFunc)
-$objForm.Controls.Add($objSrvLst)
+for($i=0;$i -lt $objSrvTab.TabCount-1;$i++) {
+    $objSrvLst=New-Object System.Windows.Forms.ListBox
+    $objSrvLst.Location=New-Object System.Drawing.Size(4,4)
+    $objSrvLst.Size=New-Object System.Drawing.Size($($objSrvTab.ClientSize.Width-8),$($objSrvTab.ClientSize.Height-8))
+    $objSrvLst.BorderStyle="FixedSingle"
+    $objSrvLst.SelectionMode="MultiExtended"
+    $objSrvLst.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $objSrvLst.Add_SelectedIndexChanged($global:SelectionChangedFunc)
+    $objSrvTab.TabPages.Item($i).Controls.Add($objSrvLst)
+}
 
-$objLbl=New-Object System.Windows.Forms.Label
-$objLbl.Location=New-Object System.Drawing.Size($($objSrvLst.Left+$objSrvLst.Width+4),4)
-$objLbl.AutoSize=$true
-$objLbl.Text="Session"
-$objForm.Controls.Add($objLbl)
+# And the search thing...
+$objSearchLbl=New-Object System.Windows.Forms.Label
+$objSearchLbl.Location=New-Object System.Drawing.Size(4,4)
+$objSearchLbl.AutoSize=$true
+$objSearchLbl.Text="Search pattern:"
+$objSrvTab.TabPages.Item($objSrvTab.TabCount-1).Controls.Add($objSearchLbl)
+
+$objSearchTxt=New-Object System.Windows.Forms.TextBox
+$objSearchTxt.Location=New-Object System.Drawing.Size(4,21)
+$objSearchTxt.Width=$($objSrvTab.ClientSize.Width-8)
+$objSearchTxt.BorderStyle="FixedSingle"
+$objSearchTxt.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+$objSearchTxt.Add_KeyDown({
+    if($_.KeyCode -eq "Enter" -and $this.Text.Trim() -ne "") {
+        SearchSessions $objSesLst $objStatBar $this.Text.Trim()
+    }
+})
+$objSrvTab.TabPages.Item($objSrvTab.TabCount-1).Controls.Add($objSearchTxt)
+
+$objSearchBtn=New-Object System.Windows.Forms.Button
+$objSearchBtn.Location=New-Object System.Drawing.Size(4,$($objSearchTxt.Top+$objSearchTxt.Height+4))
+$objSearchBtn.Size=New-Object System.Drawing.Size(120,24)
+$objSearchBtn.Text="Search"
+$objSearchBtn.Enabled=$true
+$objSearchBtn.FlatStyle="Flat"
+$objSearchBtn.Add_Click({
+    SearchSessions $objSesLst $objStatBar $objSearchTxt.Text.Trim()
+})
+$objSrvTab.TabPages.Item($objSrvTab.TabCount-1).Controls.Add($objSearchBtn)
 
 # This is the session listing grid
 $objSesLst=New-Object System.Windows.Forms.DataGridView
-$objSesLst.Location=New-Object System.Drawing.Size($($objSrvLst.Left+$objSrvLst.Width+4),$objSrvLst.Top)
-$objSesLst.Size=New-Object System.Drawing.Size(480,$objSrvLst.Height)
 $objSesLst.ColumnCount=5
 $objSesLst.SelectionMode="FullRowSelect"
 $objSesLst.BorderStyle="FixedSingle"
@@ -276,6 +365,7 @@ $objSesLst.AllowUserToDeleteRows=$false
 $objSesLst.AllowUserToResizeRows=$false
 $objSesLst.AllowUserToOrderColumns=$true
 $objSesLst.AllowUserToResizeColumns=$true
+$objSesLst.ColumnHeadersHeightSizeMode="AutoSize"
 $objSesLst.RowHeadersVisible=$false
 $objSesLst.AutoSizeRowsMode="AllCells"
 $objSesLst.AutoSizeColumnsMode="AllCells"
@@ -287,7 +377,7 @@ $objSesLst.Columns[4].Name="Status"
 $objSesLst.Add_SelectionChanged({
     $AllMirrorable=$true
     Foreach($row in $objSesLst.SelectedRows) {
-        if(($global:Servers | Where-Object {$_.Name -eq $row.Cells[3].Value}).IsNewServer -ne $true) {
+        if(($global:Servers | Where-Object {$_.Name -eq $row.Cells[3].Value}).AllowShadow -ne $true) {
             $AllMirrorable=$false
         }
     }
@@ -306,7 +396,12 @@ $objSesLst.Add_SelectionChanged({
     $objMsgBtn.Enabled=$($AllMessageable -and $objMsgBox.Text.Trim() -ne "")
     $objMirBtn.Enabled=$AllMirrorable
     $objDisBtn.Enabled=$($this.SelectedRows.Count -gt 0)
-    RefreshStatusBar $objSrvLst $objSesLst $objStatBar
+    if($objSrvTab.TabPages.Item($objSrvTab.SelectedIndex).Controls[0] -is [System.Windows.Forms.ListBox]) {
+        RefreshStatusBar $objSrvTab.TabPages.Item($objSrvTab.SelectedIndex).Controls[0] $this $objStatBar
+    }
+    else {
+        RefreshStatusBar $null $this $objStatBar
+    }
 })
 $objForm.Controls.Add($objSesLst)
 
@@ -314,12 +409,10 @@ $objForm.Controls.Add($objSesLst)
 $RefreshFunc={
     $this.Enabled=$false
     RefreshData $objTimer
-    RefreshServers $objSrvLst $objSesLst $objStatBar
+    RefreshServers $objSrvTab $objSesLst $objStatBar
     $this.Enabled=$true
 }
 $objRefBtn=New-Object System.Windows.Forms.Button
-$objRefBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$objSesLst.Top)
-$objRefBtn.Size=New-Object System.Drawing.Size(160,24)
 $objRefBtn.Text="Refresh"
 $objRefBtn.Enabled=$true
 $objRefBtn.FlatStyle="Flat"
@@ -327,8 +420,6 @@ $objRefBtn.Add_Click($RefreshFunc)
 $objForm.Controls.Add($objRefBtn)
 
 $objDisBtn=New-Object System.Windows.Forms.Button
-$objDisBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objRefBtn.Top+$objRefBtn.Height+4))
-$objDisBtn.Size=New-Object System.Drawing.Size($objRefBtn.Width,24)
 $objDisBtn.Text="Logoff"
 $objDisBtn.Enabled=$false
 $objDisBtn.FlatStyle="Flat"
@@ -349,14 +440,12 @@ $objDisBtn.Add_Click({
             $global:Sessions=$global:TempSes
         }
         write-host "Finished."
-        RefreshServers $objSrvLst $objSesLst $objStatBar
+        RefreshServers $objSrvTab $objSesLst $objStatBar
     }
 })
 $objForm.Controls.Add($objDisBtn)
 
 $objMirBtn=New-Object System.Windows.Forms.Button
-$objMirBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objDisBtn.Top+$objDisBtn.Height+4))
-$objMirBtn.Size=New-Object System.Drawing.Size($objRefBtn.Width,24)
 $objMirBtn.Text="Shadow"
 $objMirBtn.Enabled=$false
 $objMirBtn.FlatStyle="Flat"
@@ -377,8 +466,6 @@ $objForm.Controls.Add($objMirBtn)
 $objMsgBox=New-Object System.Windows.Forms.TextBox
 $objMsgBox.Multiline=$true
 $objMsgBox.ScrollBars="Vertical"
-$objMsgBox.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objMirBtn.Top+$objMirBtn.Height+4))
-$objMsgBox.Size=New-Object System.Drawing.Size($objRefBtn.Width,$($objForm.ClientSize.Height-$objMirBtn.Top-$objMirBtn.Height-32))
 $objMsgBox.Enabled=$false
 $objMsgBox.BorderStyle="FixedSingle"
 $objMsgBox.Add_KeyDown({
@@ -390,8 +477,6 @@ $objMsgBox.Add_KeyUp({
 $objForm.Controls.Add($objMsgBox)
 
 $objMsgBtn=New-Object System.Windows.Forms.Button
-$objMsgBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objMsgBox.Top+$objMsgBox.Height+4))
-$objMsgBtn.Size=New-Object System.Drawing.Size($objRefBtn.Width,24)
 $objMsgBtn.Text="Send"
 $objMsgBtn.Enabled=$false
 $objMsgBtn.FlatStyle="Flat"
@@ -408,19 +493,6 @@ $objMsgBtn.Add_Click({
 })
 $objForm.Controls.Add($objMsgBtn)
 
-$objStatBar=New-Object System.Windows.Forms.StatusBar
-$objForm.Controls.Add($objStatBar)
-
-# A workaround to disable autosize of the form but keep the current window size...
-$w=$objForm.Width
-$h=$objForm.Height
-$objForm.AutoSize=$false
-$objForm.Width=$w
-$objForm.Height=$h
-
-# OK, now initially fill the lists with values...
-RefreshServers $objSrvLst $objSesLst $objStatBar
-
 # A timer to automatically refresh (currently disabled)
 $objTimer=New-Object System.Windows.Forms.Timer
 $objTimer.Interval=600000
@@ -429,25 +501,30 @@ $objTimer.Enabled=$false
 $objTimer.Add_Tick($RefreshFunc)
 
 # A nice looking function (visuability is everything...)
-$ResizeFunc={
-    $objSrvLst.Height=$objForm.ClientSize.Height-$objStatBar.Height-$objLbl.Height-8
-    $objSesLst.Height=$objSrvLst.Height
-    $objSesLst.Width=$objForm.ClientSize.Width-16-$objSrvLst.Width-120
-    $objMsgBox.Height=$objSrvLst.Height-112
-    $objMsgBtn.Top=$objMsgBox.Top+$objMsgBox.Height+4
-    $objRefBtn.Width=$objForm.ClientSize.Width-8-$objSesLst.Left-$objSesLst.Width
-    $objDisBtn.Width=$objRefBtn.Width
-    $objMirBtn.Width=$objRefBtn.Width
-    $objMsgBox.Width=$objRefBtn.Width
-    $objMsgBtn.Width=$objRefBtn.Width
-    $objRefBtn.Left=$objSesLst.Left+$objSesLst.Width+4
-    $objDisBtn.Left=$objRefBtn.Left
-    $objMirBtn.Left=$objRefBtn.Left
-    $objMsgBox.Left=$objRefBtn.Left
-    $objMsgBtn.Left=$objRefBtn.Left
-}
-$objForm.Add_Resize($ResizeFunc)
-$objForm.Add_Shown($ResizeFunc)
+$objForm.Add_Shown({
+    $objSrvTab.Location=New-Object System.Drawing.Size(4,4)
+    $objSrvTab.Size=New-Object System.Drawing.Size(200,450)
+    $objSrvTab.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
+    $objSesLst.Location=New-Object System.Drawing.Size($($objSrvTab.Left+$objSrvTab.Width+4),$objSrvTab.Top)
+    $objSesLst.Size=New-Object System.Drawing.Size(450,$objSrvTab.Height)
+    $objSesLst.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $objRefBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$objSesLst.Top)
+    $objRefBtn.Size=New-Object System.Drawing.Size(118,24)
+    $objRefBtn.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $objDisBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objRefBtn.Top+$objRefBtn.Height+4))
+    $objDisBtn.Size=New-Object System.Drawing.Size($objRefBtn.Width,24)
+    $objDisBtn.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $objMirBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objDisBtn.Top+$objDisBtn.Height+4))
+    $objMirBtn.Size=New-Object System.Drawing.Size($objRefBtn.Width,24)
+    $objMirBtn.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $objMsgBox.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objMirBtn.Top+$objMirBtn.Height+4))
+    $objMsgBox.Size=New-Object System.Drawing.Size($objRefBtn.Width,$($objSesLst.Height-$objMirBtn.Top-$objMirBtn.Height-28))
+    $objMsgBox.Anchor=[System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Bottom
+    $objMsgBtn.Location=New-Object System.Drawing.Size($($objSesLst.Left+$objSesLst.Width+4),$($objMsgBox.Top+$objMsgBox.Height+4))
+    $objMsgBtn.Size=New-Object System.Drawing.Size($objRefBtn.Width,24)
+    $objMsgBtn.Anchor=[System.Windows.Forms.AnchorStyles]::Right -bor [System.Windows.Forms.AnchorStyles]::Bottom
+    RefreshServers $objSrvTab $objSesLst $objStatBar
+})
 
 #Show the form
 [void]$objForm.ShowDialog()
